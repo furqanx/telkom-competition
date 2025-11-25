@@ -1,8 +1,8 @@
 # YOLOv5 Dataset Configuration
 # Digunakan untuk training model deteksi kantuk
 
-# 1. Dataset Path
-# Ini mengarah ke folder output dari script generate_dataset_master.py
+# 1. dataset path
+# ini mengarah ke folder output dari script generate_dataset_master.py
 # YOLOv5 akan otomatis mencari folder /labels/ di sebelah folder /images/
 path: data/processed
 train: images/train
