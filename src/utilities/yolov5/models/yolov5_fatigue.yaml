@@ -1,0 +1,104 @@
+# YOLOv5 🚀 by Ultralytics, GPL-3.0 license
+
+# Parameters
+nc: 7                # Number of classes (face, o_mouth, o_eyes, c_mouth, c_eyes)
+depth_multiple: 1.0  # Model depth multiple
+width_multiple: 1.0  # Layer channel multiple
+anchors:
+  - [10,  13, 16,  30,  33,  23 ] # P3/8
+  - [30,  61, 62,  45,  59,  119] # P4/16
+  - [116, 90, 156, 198, 373, 326] # P5/32
+
+
+
+
+
+# YOLOv5 v6.0 backbone using ShuffleNetv2_BD
+backbone:
+  #           [from, number, module, args]
+  # Arguments for Shuffle_Block_BD: [out_channels, stride]
+
+  [
+    # Layer 0-1: Stem (awal masuk) (CBR-MP as per Figure 8) - Input 640x640
+    [-1, 1,     Conv        , [24,  3, 2]], # Layer 0: P1/2 (320x320)    Conv biasa, stride 2 (kecilin gambar)
+    [-1, 1, nn.MaxPool2d    , [3,   2, 1]], # Layer 1: P2/4 (160x160)    MaxPool,    stride 2 (kecilin gambar)
+
+    # Layer 2-3: Stage 2 (Output P3 - Fitur Detail/Dangkal) (116 channels)
+    [-1, 1, Shuffle_Block_BD, [116, 2]],    # Layer 2: P3/8 (Downsample)  
+    [-1, 3, Shuffle_Block_BD, [116, 1]],    # Layer 3: (Repeat 3x)
+
+    # Layer 4-5: Stage 3 (Output P4 - Fitur Menengah) (232 channels)
+    [-1, 1, Shuffle_Block_BD, [232, 2]],    # Layer 4: P4/16 (Downsample)   
+    [-1, 7, Shuffle_Block_BD, [232, 1]],    # Layer 5: (Repeat 7x)         
+
+    # Stage 4 (Output P5 - 464 channels)
+    [-1, 1, Shuffle_Block_BD, [464, 2]],    # Layer 6: P5/32 (Downsample)
+    [-1, 3, Shuffle_Block_BD, [464, 1]],    # Layer 7: (Repeat 3x)           
+
+    # SPPF (Figure 8 top left)
+    [-1, 1,      SPPF,        [464, 5]],    # Layer 8: Menangkap konteks global
+  ]
+
+
+
+
+
+# Head (M-CFAM + Neck L-CIFM)
+head: [
+    # ================= M-CFAM START (Figure 3 & 8) =================
+    # Inputs: P3(layer 3), P4(layer 5), P5(layer 8 SPPF)
+    # Note: MCFN args: [c_low, c_mid, c_high, c_out]
+    # We verify sizes manually: P3=116, P4=232, P5=464
+
+    # Node 1 (Kiri Atas - Olah P5)
+    # Input: [Mid=P5(8), High=None, Low=P4(5)] -> Output 464
+    [[5, 8, 8], 1, MCFN, [232, 464, 0, 464]], # 9 (P5_Enhanced)
+
+    # Node 2 (Kiri Bawah - Olah P3)
+    # Input: [Mid=P3(3), High=P4(5), Low=None] -> Output 116
+    [[3, 3, 5], 1, MCFN, [0, 120, 232, 120]], # 10 (P3_Enhanced)
+
+    # Node 3 (Tengah - Olah P4)
+    # Input: [Mid=P4(5), High=P5(8), Low=P3(3)] -> Output 232
+    [[3, 5, 8], 1, MCFN, [120, 232, 464, 232]], # 11 (P4_Enhanced)
+
+    # ==========================M-CFAM END ===========================
+
+
+
+
+    # ================= NECK (FPN + PANet with L-CIFM) =================
+    # Structure from Figure 8 Right Side
+
+    # Upsample P5 (from M-CFAM Node 9/11/etc)
+    # Let's map: P5_new=11, P4_new=11, P3_new=10? No, M-CFAM logic is complex.
+    # Let's assume standard FPN flow but using M-CFAM outputs
+
+    # Route P5 Enhanced (Layer 9)
+    [9, 1, Conv, [232, 1, 1]], # 12
+    [-1, 1, nn.Upsample, [None, 2, "nearest"]], # 13
+    [[-1, 11], 1, Concat, [1]], # 14 (Cat with P4_Enhanced from Layer 11)
+    [-1, 3, LCIFM, [232]], # 15 (Processing P4-P5)
+
+    # Route P4 -> P3
+    # [-1, 1, Conv, [116, 1, 1]], # 16
+    [-1, 1, Conv, [120, 1, 1]],   # 16
+    [-1, 1, nn.Upsample, [None, 2, "nearest"]], # 17
+    [[-1, 10], 1, Concat, [1]], # 18 (Cat with P3_Enhanced from Layer 10)
+    # [-1, 3, LCIFM, [116]], # 19 (Processing P3-P4) -> Detect Head P3
+    [-1, 3, LCIFM, [120]], # 19 (Processing P3-P4) -> Detect Head P3
+
+    # Route P3 -> P4 (Downsample)
+    # [-1, 1, Conv, [116, 3, 2]], # 20
+    [-1, 1, Conv, [120, 3, 2]], # 20
+    [[-1, 16], 1, Concat, [1]], # 21 (Cat with P4 lateral)
+    [-1, 3, LCIFM, [232]], # 22 -> Detect Head P4
+
+    # Route P4 -> P5 (Downsample)
+    [-1, 1, Conv, [232, 3, 2]], # 23
+    [[-1, 12], 1, Concat, [1]], # 24 (Cat with P5 lateral)
+    [-1, 3, LCIFM, [464]], # 25 -> Detect Head P5
+
+    # Detect Head
+    [[19, 22, 25], 1, Detect, [nc, anchors]],
+  ]

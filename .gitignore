@@ -1,7 +1,7 @@
-data/
-docs/
-env/
-logs/
-models/
-reports/
-tests/
+/data/
+/docs/
+/env/
+/logs/
+/models/
+/reports/
+/tests/
